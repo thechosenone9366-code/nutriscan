@@ -1,0 +1,1215 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="theme-color" content="#0a0a12">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="NutriScan">
+<meta name="description" content="Scanner de produits alimentaires avec analyse nutritionnelle IA">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="icon" type="image/png" href="icon-192.png">
+<title>NutriScan AR</title>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:ital,wght@0,300;0,400;0,500;1,400&display=swap" rel="stylesheet">
+<!-- ZXing barcode scanner library -->
+<script src="https://unpkg.com/@zxing/library@0.19.1/umd/index.min.js"></script>
+<!-- Capacitor (injected at build time by Capacitor CLI) -->
+<script>
+// Capacitor bridge - gracefully degrade if not in native context
+window.isNative = false;
+document.addEventListener('deviceready', () => { window.isNative = true; });
+</script>
+
+<style>
+:root {
+  --glass: rgba(255,255,255,0.07);
+  --glass-border: rgba(255,255,255,0.15);
+  --glass-strong: rgba(255,255,255,0.13);
+  --accent: #00f5c4;
+  --accent2: #7b61ff;
+  --red: #ff4d6d;
+  --yellow: #ffd166;
+  --green: #06d6a0;
+  --blur: blur(24px);
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+}
+*, *::before, *::after { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color: transparent; }
+html, body {
+  height: 100%; overflow: hidden;
+  background: #0a0a12; color: #fff;
+  font-family: 'DM Sans', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ===== SCREENS ===== */
+.screen { 
+  position: fixed; inset: 0;
+  display: flex; flex-direction: column;
+  transition: opacity 0.35s, transform 0.35s;
+}
+.screen.hidden { opacity: 0; pointer-events: none; transform: scale(0.97); }
+
+/* ===== SPLASH SCREEN ===== */
+#screen-splash {
+  background: radial-gradient(ellipse at 30% 40%, rgba(0,245,196,0.15) 0%, transparent 60%),
+              radial-gradient(ellipse at 70% 70%, rgba(123,97,255,0.1) 0%, transparent 50%),
+              #0a0a12;
+  align-items: center; justify-content: center; gap: 20px;
+}
+.splash-logo { font-family:'Syne',sans-serif; font-weight:800; font-size:2.8rem; letter-spacing:-0.03em; }
+.splash-logo span { color: var(--accent); }
+.splash-sub { font-size:0.9rem; color:rgba(255,255,255,0.4); letter-spacing:0.05em; text-transform:uppercase; }
+.splash-icon {
+  width:100px; height:100px;
+  border-radius:28px;
+  background: linear-gradient(135deg, rgba(0,245,196,0.2), rgba(123,97,255,0.2));
+  border: 1px solid rgba(0,245,196,0.3);
+  display:flex; align-items:center; justify-content:center;
+  font-size:3rem;
+  box-shadow: 0 0 60px rgba(0,245,196,0.15);
+}
+.splash-btn {
+  margin-top: 20px;
+  background: var(--accent); color: #0a0a12;
+  border: none; border-radius: 16px;
+  padding: 16px 40px;
+  font-family: 'Syne', sans-serif; font-weight: 700; font-size: 1rem;
+  cursor: pointer;
+  box-shadow: 0 0 40px rgba(0,245,196,0.3);
+  transition: all 0.2s;
+}
+.splash-btn:active { transform: scale(0.96); }
+.splash-perms { font-size:0.72rem; color:rgba(255,255,255,0.3); text-align:center; max-width:240px; line-height:1.5; }
+
+/* ===== SCANNER SCREEN ===== */
+#screen-scanner { background: #000; }
+
+/* Camera */
+#camera-container {
+  position: relative; flex: 1; overflow: hidden;
+  background: #000;
+  display: flex; align-items: center; justify-content: center;
+}
+#video-preview {
+  position: absolute; inset: 0;
+  width: 100%; height: 100%;
+  object-fit: cover;
+}
+#canvas-hidden { display: none; }
+
+/* Dark overlay with cutout */
+.scan-overlay {
+  position: absolute; inset: 0;
+  background: rgba(0,0,0,0.55);
+  pointer-events: none;
+}
+.scan-window {
+  position: absolute;
+  width: 72vw; max-width: 280px;
+  height: 72vw; max-height: 280px;
+  top: 50%; left: 50%;
+  transform: translate(-50%, -58%);
+  background: transparent;
+}
+/* Clear cutout */
+.scan-window::before {
+  content: '';
+  position: absolute; inset: -2000px;
+  background: rgba(0,0,0,0.55);
+}
+.scan-window-inner {
+  position: relative;
+  width: 100%; height: 100%;
+  background: transparent;
+  z-index: 1;
+}
+
+/* Corners */
+.corner {
+  position: absolute; width: 32px; height: 32px;
+  border-color: var(--accent); border-style: solid;
+  transition: border-color 0.3s;
+}
+.corner.found { border-color: #fff; }
+.tl { top:0; left:0; border-width: 3px 0 0 3px; border-radius: 4px 0 0 0; }
+.tr { top:0; right:0; border-width: 3px 3px 0 0; border-radius: 0 4px 0 0; }
+.bl { bottom:0; left:0; border-width: 0 0 3px 3px; border-radius: 0 0 0 4px; }
+.br { bottom:0; right:0; border-width: 0 3px 3px 0; border-radius: 0 0 4px 0; }
+
+/* Scan line */
+.scan-line {
+  position: absolute; left: 0; right: 0; height: 2px;
+  background: linear-gradient(90deg, transparent, var(--accent) 20%, var(--accent) 80%, transparent);
+  box-shadow: 0 0 12px var(--accent), 0 0 24px rgba(0,245,196,0.3);
+  animation: scanMove 2.2s ease-in-out infinite;
+}
+@keyframes scanMove {
+  0%   { top: 4px; opacity: 0; }
+  10%  { opacity: 1; }
+  90%  { opacity: 1; }
+  100% { top: calc(100% - 4px); opacity: 0; }
+}
+.scan-line.paused { animation: none; opacity: 0; }
+
+/* Corner pulse on find */
+@keyframes cornerPulse {
+  0%,100% { box-shadow: none; }
+  50% { box-shadow: 0 0 20px rgba(255,255,255,0.8); }
+}
+
+/* Instructions */
+.scan-instruction {
+  position: absolute; bottom: 18%;
+  left: 50%; transform: translateX(-50%);
+  text-align: center; white-space: nowrap;
+  font-size: 0.8rem; color: rgba(255,255,255,0.7);
+  background: rgba(0,0,0,0.5);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 20px; padding: 8px 18px;
+  transition: all 0.3s;
+}
+
+/* Top bar */
+#scanner-header {
+  position: absolute; top: 0; left: 0; right: 0;
+  padding: calc(var(--safe-top) + 12px) 20px 12px;
+  display: flex; align-items: center; justify-content: space-between;
+  background: linear-gradient(to bottom, rgba(0,0,0,0.7), transparent);
+  z-index: 10;
+}
+.header-logo { font-family:'Syne',sans-serif; font-weight:800; font-size:1.1rem; }
+.header-logo span { color: var(--accent); }
+.header-actions { display: flex; gap: 10px; }
+.icon-btn {
+  width:40px; height:40px;
+  border-radius:12px;
+  background: rgba(255,255,255,0.1);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(255,255,255,0.15);
+  display:flex; align-items:center; justify-content:center;
+  cursor:pointer; font-size:1.1rem;
+  transition: all 0.2s;
+}
+.icon-btn:active { transform: scale(0.9); background: rgba(255,255,255,0.2); }
+
+/* Bottom tab bar */
+#tab-bar {
+  position: absolute; bottom: 0; left: 0; right: 0;
+  padding: 10px 20px calc(var(--safe-bottom) + 10px);
+  display: flex; gap: 10px;
+  background: linear-gradient(to top, rgba(0,0,0,0.85) 60%, transparent);
+  z-index: 10;
+}
+.tab-btn {
+  flex: 1; background: rgba(255,255,255,0.08);
+  backdrop-filter: blur(15px);
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 14px; padding: 10px 8px;
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
+  cursor: pointer; transition: all 0.2s; color: rgba(255,255,255,0.6);
+  font-size: 0.62rem; font-family:'DM Sans',sans-serif;
+}
+.tab-btn .tab-icon { font-size: 1.3rem; }
+.tab-btn.active { color: var(--accent); background: rgba(0,245,196,0.12); border-color: rgba(0,245,196,0.3); }
+.tab-btn:active { transform: scale(0.95); }
+
+/* ===== RESULT PANEL (bottom sheet) ===== */
+#result-sheet {
+  position: fixed;
+  left: 0; right: 0; bottom: 0;
+  max-height: 85dvh;
+  background: rgba(12,12,22,0.92);
+  backdrop-filter: var(--blur);
+  -webkit-backdrop-filter: var(--blur);
+  border: 1px solid var(--glass-border);
+  border-bottom: none;
+  border-radius: 28px 28px 0 0;
+  z-index: 100;
+  transform: translateY(100%);
+  transition: transform 0.45s cubic-bezier(0.34, 1.1, 0.64, 1);
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+}
+#result-sheet.open { transform: translateY(0); }
+
+.sheet-handle {
+  width: 40px; height: 4px; border-radius: 2px;
+  background: rgba(255,255,255,0.2);
+  margin: 14px auto 0;
+}
+.sheet-content { padding: 16px 20px calc(var(--safe-bottom) + 24px); }
+
+/* Product hero */
+.product-hero {
+  display: flex; align-items: center; gap: 16px;
+  margin-bottom: 20px;
+}
+.product-emoji-big {
+  width: 72px; height: 72px; border-radius: 20px;
+  background: linear-gradient(135deg, rgba(0,245,196,0.15), rgba(123,97,255,0.15));
+  border: 1px solid rgba(0,245,196,0.2);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 2.2rem; flex-shrink: 0;
+}
+.product-hero-info { flex: 1; min-width: 0; }
+.product-hero-name {
+  font-family: 'Syne', sans-serif; font-weight: 700; font-size: 1.05rem;
+  line-height: 1.25; margin-bottom: 4px;
+  overflow: hidden; text-overflow: ellipsis; display: -webkit-box;
+  -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+}
+.product-hero-brand { font-size: 0.75rem; color: rgba(255,255,255,0.45); margin-bottom: 8px; }
+.nutri-grade-badge {
+  display: inline-flex; align-items: center; gap: 6px;
+  border-radius: 8px; padding: 4px 10px;
+  font-family: 'Syne', sans-serif; font-weight: 700; font-size: 0.75rem;
+}
+
+/* Glass cards */
+.glass-card {
+  background: var(--glass);
+  border: 1px solid var(--glass-border);
+  border-radius: 18px; padding: 16px;
+  margin-bottom: 12px;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.08);
+}
+.card-title {
+  font-family: 'Syne', sans-serif; font-weight: 700; font-size: 0.65rem;
+  letter-spacing: 0.1em; text-transform: uppercase;
+  color: rgba(255,255,255,0.45); margin-bottom: 12px;
+  display: flex; align-items: center; gap: 8px;
+}
+.card-title::before {
+  content: ''; width: 4px; height: 4px; border-radius: 50%;
+  background: var(--accent); box-shadow: 0 0 6px var(--accent); flex-shrink: 0;
+}
+
+/* Nutrition grid */
+.nutri-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.nutri-item {
+  background: rgba(255,255,255,0.05); border-radius: 12px;
+  padding: 10px 12px;
+}
+.nutri-item-label { font-size: 0.65rem; color: rgba(255,255,255,0.45); margin-bottom: 4px; }
+.nutri-item-val { font-family: 'Syne', sans-serif; font-weight: 700; font-size: 1rem; }
+.nutri-item-sub { font-size: 0.6rem; color: rgba(255,255,255,0.3); margin-top: 2px; }
+.nutri-item.highlight { background: rgba(0,245,196,0.08); border: 1px solid rgba(0,245,196,0.15); }
+
+/* Health score */
+.score-display { display: flex; align-items: center; gap: 16px; margin-bottom: 12px; }
+.score-circle {
+  width: 64px; height: 64px; border-radius: 50%; flex-shrink: 0;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  font-family: 'Syne', sans-serif;
+}
+.score-circle-num { font-weight: 800; font-size: 1.3rem; line-height: 1; }
+.score-circle-max { font-size: 0.55rem; color: rgba(255,255,255,0.5); }
+.score-info { flex: 1; }
+.score-grade { font-family: 'Syne', sans-serif; font-weight: 700; font-size: 0.85rem; margin-bottom: 4px; }
+.score-bar { height: 6px; border-radius: 3px; background: rgba(255,255,255,0.1); overflow: hidden; }
+.score-fill { height: 100%; border-radius: 3px; transition: width 0.8s ease 0.2s; width: 0; }
+.score-desc { font-size: 0.72rem; color: rgba(255,255,255,0.5); line-height: 1.45; margin-top: 8px; }
+
+/* Ingredients */
+.ingredients-text { font-size: 0.72rem; color: rgba(255,255,255,0.5); line-height: 1.6; }
+.allergen-tag {
+  display: inline-block; background: rgba(255,77,109,0.15);
+  border: 1px solid rgba(255,77,109,0.3); color: #ff4d6d;
+  border-radius: 6px; padding: 2px 7px; font-size: 0.62rem; font-weight:600;
+  margin: 3px 2px 0 0;
+}
+
+/* Actions */
+.action-row { display: flex; gap: 10px; margin-bottom: 12px; }
+.action-btn {
+  flex: 1; padding: 12px; border-radius: 14px;
+  background: var(--glass); border: 1px solid var(--glass-border);
+  color: #fff; font-family: 'DM Sans', sans-serif; font-size: 0.8rem;
+  cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px;
+  transition: all 0.2s;
+}
+.action-btn:active { transform: scale(0.96); background: var(--glass-strong); }
+.action-btn.primary { background: rgba(0,245,196,0.15); border-color: rgba(0,245,196,0.3); color: var(--accent); }
+.close-btn {
+  width: 100%; padding: 14px; border-radius: 16px;
+  background: rgba(255,255,255,0.07); border: 1px solid rgba(255,255,255,0.12);
+  color: rgba(255,255,255,0.6); font-family: 'DM Sans', sans-serif; font-size: 0.9rem;
+  cursor: pointer; transition: all 0.2s;
+}
+.close-btn:active { background: rgba(255,255,255,0.12); }
+
+/* ===== HISTORY SCREEN ===== */
+#screen-history {
+  background: #0a0a12;
+  padding-top: var(--safe-top);
+}
+.history-header {
+  padding: 20px 20px 10px;
+  background: rgba(10,10,18,0.95);
+  backdrop-filter: var(--blur);
+  border-bottom: 1px solid var(--glass-border);
+}
+.history-header h1 { font-family:'Syne',sans-serif; font-weight:800; font-size:1.4rem; }
+.history-header p { font-size:0.78rem; color:rgba(255,255,255,0.4); margin-top:4px; }
+#history-list {
+  flex: 1; overflow-y: auto; padding: 16px 20px;
+  display: flex; flex-direction: column; gap: 10px;
+  -webkit-overflow-scrolling: touch;
+}
+.history-item {
+  display: flex; align-items: center; gap: 14px;
+  background: var(--glass); border: 1px solid var(--glass-border);
+  border-radius: 16px; padding: 12px 14px; cursor: pointer;
+  transition: all 0.2s;
+}
+.history-item:active { background: var(--glass-strong); }
+.history-emoji { font-size: 2rem; flex-shrink: 0; }
+.history-info { flex: 1; min-width: 0; }
+.history-name { font-family:'Syne',sans-serif; font-weight:600; font-size:0.85rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.history-brand { font-size:0.7rem; color:rgba(255,255,255,0.4); margin-top:2px; }
+.history-time { font-size:0.65rem; color:rgba(255,255,255,0.3); }
+.history-score-badge {
+  width: 36px; height: 36px; border-radius: 10px;
+  display:flex; align-items:center; justify-content:center;
+  font-family:'Syne',sans-serif; font-weight:800; font-size:0.75rem;
+  flex-shrink: 0;
+}
+.empty-history {
+  flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 12px; color: rgba(255,255,255,0.3);
+}
+.empty-history .empty-icon { font-size:3.5rem; opacity:0.4; }
+.empty-history p { font-size:0.85rem; }
+
+/* ===== LOADING STATE ===== */
+#loading-overlay {
+  position: fixed; inset: 0; z-index: 200;
+  background: rgba(10,10,18,0.85);
+  backdrop-filter: var(--blur);
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 20px; opacity: 0; pointer-events: none; transition: opacity 0.3s;
+}
+#loading-overlay.show { opacity: 1; pointer-events: all; }
+.loading-spinner {
+  width: 56px; height: 56px; border-radius: 50%;
+  border: 3px solid rgba(0,245,196,0.2);
+  border-top-color: var(--accent);
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+.loading-steps { display: flex; flex-direction: column; gap: 8px; text-align: center; }
+.loading-step { font-size: 0.8rem; color: rgba(255,255,255,0.5); transition: color 0.3s; }
+.loading-step.active { color: var(--accent); }
+.loading-step.done { color: rgba(0,245,196,0.5); }
+.loading-step.done::before { content: '✓ '; }
+
+/* Toast */
+#toast {
+  position: fixed; top: calc(var(--safe-top) + 70px); left: 50%; z-index: 300;
+  transform: translateX(-50%) translateY(-8px);
+  background: rgba(20,20,35,0.95); backdrop-filter: blur(20px);
+  border: 1px solid var(--glass-border); border-radius: 12px;
+  padding: 10px 18px; font-size: 0.8rem; white-space: nowrap;
+  opacity: 0; transition: all 0.3s; pointer-events: none;
+}
+#toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+#toast.success { border-color: rgba(0,245,196,0.4); color: var(--accent); }
+#toast.error { border-color: rgba(255,77,109,0.4); color: var(--red); }
+
+/* Manual input */
+.manual-input-wrap { padding: 0 20px 12px; }
+.manual-input {
+  width: 100%; background: var(--glass); border: 1px solid var(--glass-border);
+  border-radius: 14px; padding: 12px 16px; color: #fff;
+  font-family: 'DM Sans', sans-serif; font-size: 0.9rem;
+  outline: none; transition: all 0.2s;
+}
+.manual-input:focus { border-color: rgba(0,245,196,0.5); background: var(--glass-strong); }
+.manual-input::placeholder { color: rgba(255,255,255,0.25); }
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 0; height: 0; }
+
+/* Animations */
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.fade-in-up { animation: fadeInUp 0.4s ease both; }
+</style>
+</head>
+<body>
+
+<!-- SPLASH SCREEN -->
+<div id="screen-splash" class="screen">
+  <div class="splash-icon">🔍</div>
+  <div>
+    <div class="splash-logo">Nutri<span>Scan</span></div>
+    <div style="text-align:center;margin-top:4px;">
+      <span class="splash-sub">Scanner alimentaire IA</span>
+    </div>
+  </div>
+  <div class="splash-perms">
+    Cette app utilise votre caméra pour scanner les codes-barres et la base de données Open Food Facts.
+  </div>
+  <button class="splash-btn" onclick="startApp()">📷 Démarrer le scan</button>
+  <div class="splash-perms" style="margin-top:8px;">
+    Pour installer : Menu ⋯ → "Ajouter à l'écran d'accueil"
+  </div>
+</div>
+
+<!-- SCANNER SCREEN -->
+<div id="screen-scanner" class="screen hidden">
+  <div id="camera-container">
+    <video id="video-preview" playsinline autoplay muted></video>
+    <canvas id="canvas-hidden"></canvas>
+
+    <!-- Overlay -->
+    <div class="scan-overlay"></div>
+    <div class="scan-window">
+      <div class="scan-window-inner">
+        <div class="corner tl" id="c-tl"></div>
+        <div class="corner tr" id="c-tr"></div>
+        <div class="corner bl" id="c-bl"></div>
+        <div class="corner br" id="c-br"></div>
+        <div class="scan-line" id="scan-line"></div>
+      </div>
+    </div>
+
+    <div class="scan-instruction" id="scan-instruction">Centrez le code-barres</div>
+
+    <!-- Header overlay -->
+    <div id="scanner-header">
+      <div class="header-logo">Nutri<span>Scan</span></div>
+      <div class="header-actions">
+        <div class="icon-btn" onclick="toggleTorch()" id="torch-btn" title="Lampe">💡</div>
+        <div class="icon-btn" onclick="openManualInput()" title="Saisir code">⌨️</div>
+        <div class="icon-btn" onclick="switchCamera()" title="Changer caméra">🔄</div>
+      </div>
+    </div>
+
+    <!-- Tab bar -->
+    <div id="tab-bar">
+      <div class="tab-btn active" onclick="showTab('scanner')">
+        <span class="tab-icon">📷</span>Scanner
+      </div>
+      <div class="tab-btn" onclick="showTab('history')">
+        <span class="tab-icon">📋</span>Historique
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- HISTORY SCREEN -->
+<div id="screen-history" class="screen hidden">
+  <div class="history-header">
+    <h1>Historique</h1>
+    <p id="history-count">Aucun produit scanné</p>
+  </div>
+  <div id="history-list">
+    <div class="empty-history" id="empty-history">
+      <div class="empty-icon">🔍</div>
+      <p>Aucun produit scanné</p>
+      <p style="font-size:0.72rem;margin-top:4px;">Commencez à scanner !</p>
+    </div>
+  </div>
+  <div id="tab-bar-history" style="position:sticky;bottom:0;background:rgba(10,10,18,0.95);backdrop-filter:blur(20px);border-top:1px solid rgba(255,255,255,0.08);display:flex;gap:10px;padding:10px 20px calc(env(safe-area-inset-bottom,0px) + 10px);">
+    <div class="tab-btn" onclick="showTab('scanner')"><span class="tab-icon">📷</span>Scanner</div>
+    <div class="tab-btn active" onclick="showTab('history')"><span class="tab-icon">📋</span>Historique</div>
+  </div>
+</div>
+
+<!-- RESULT BOTTOM SHEET -->
+<div id="result-sheet">
+  <div class="sheet-handle"></div>
+  <div class="sheet-content" id="sheet-content"></div>
+</div>
+
+<!-- LOADING OVERLAY -->
+<div id="loading-overlay">
+  <div class="loading-spinner"></div>
+  <div class="loading-steps">
+    <div class="loading-step" id="ls1">Code-barres détecté</div>
+    <div class="loading-step" id="ls2">Recherche produit...</div>
+    <div class="loading-step" id="ls3">Analyse nutritionnelle</div>
+    <div class="loading-step" id="ls4">Calcul score santé</div>
+  </div>
+</div>
+
+<!-- TOAST -->
+<div id="toast"></div>
+
+<script>
+// ===========================
+// STATE
+// ===========================
+let codeReader = null;
+let currentStream = null;
+let scanning = true;
+let torchOn = false;
+let facingMode = 'environment';
+let history = JSON.parse(localStorage.getItem('nutriscan_history') || '[]');
+let lastScannedCode = null;
+let lastScannedTime = 0;
+
+// ===========================
+// APP START
+// ===========================
+async function startApp() {
+  showScreen('scanner');
+  await initCamera();
+}
+
+function showScreen(name) {
+  document.querySelectorAll('.screen').forEach(s => s.classList.add('hidden'));
+  document.getElementById(`screen-${name}`).classList.remove('hidden');
+}
+
+// ===========================
+// CAMERA & SCANNER
+// ===========================
+async function initCamera() {
+  try {
+    if (currentStream) {
+      currentStream.getTracks().forEach(t => t.stop());
+    }
+
+    const constraints = {
+      video: {
+        facingMode: facingMode,
+        width: { ideal: 1280 },
+        height: { ideal: 720 },
+        focusMode: 'continuous'
+      }
+    };
+
+    currentStream = await navigator.mediaDevices.getUserMedia(constraints);
+    const video = document.getElementById('video-preview');
+    video.srcObject = currentStream;
+    await video.play();
+
+    startZXingScanner();
+  } catch (err) {
+    console.error('Camera error:', err);
+    showToast('❌ Erreur caméra: ' + err.message, 'error');
+    // Offer manual input as fallback
+    setTimeout(() => openManualInput(), 1500);
+  }
+}
+
+function startZXingScanner() {
+  if (typeof ZXing === 'undefined') {
+    console.warn('ZXing not loaded, using fallback');
+    showToast('⌨️ Entrez le code manuellement', 'error');
+    return;
+  }
+
+  const hints = new Map();
+  const formats = [
+    ZXing.BarcodeFormat.EAN_13,
+    ZXing.BarcodeFormat.EAN_8,
+    ZXing.BarcodeFormat.UPC_A,
+    ZXing.BarcodeFormat.UPC_E,
+    ZXing.BarcodeFormat.CODE_128,
+    ZXing.BarcodeFormat.CODE_39,
+    ZXing.BarcodeFormat.ITF,
+    ZXing.BarcodeFormat.DATA_MATRIX,
+    ZXing.BarcodeFormat.QR_CODE
+  ];
+  hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, formats);
+  hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
+
+  codeReader = new ZXing.BrowserMultiFormatReader(hints, {
+    delayBetweenScanAttempts: 300
+  });
+
+  const video = document.getElementById('video-preview');
+
+  codeReader.decodeFromVideoElement(video, (result, err) => {
+    if (result && scanning) {
+      const code = result.getText();
+      const now = Date.now();
+      // Debounce: same code not rescanned within 5 seconds
+      if (code === lastScannedCode && now - lastScannedTime < 5000) return;
+      lastScannedCode = code;
+      lastScannedTime = now;
+
+      scanning = false;
+      onBarcodeFound(code);
+    }
+  });
+}
+
+async function switchCamera() {
+  facingMode = facingMode === 'environment' ? 'user' : 'environment';
+  if (codeReader) codeReader.reset();
+  await initCamera();
+}
+
+async function toggleTorch() {
+  try {
+    const track = currentStream?.getVideoTracks()[0];
+    if (!track) return;
+    const caps = track.getCapabilities();
+    if (!caps.torch) { showToast('Lampe non disponible', 'error'); return; }
+    torchOn = !torchOn;
+    await track.applyConstraints({ advanced: [{ torch: torchOn }] });
+    document.getElementById('torch-btn').style.background = torchOn
+      ? 'rgba(255,220,50,0.3)' : 'rgba(255,255,255,0.1)';
+  } catch (e) {
+    showToast('Lampe non disponible', 'error');
+  }
+}
+
+// ===========================
+// BARCODE FOUND
+// ===========================
+async function onBarcodeFound(code) {
+  // Visual feedback
+  flashCorners();
+  document.getElementById('scan-line').classList.add('paused');
+  document.getElementById('scan-instruction').textContent = '✓ Code détecté: ' + code;
+
+  showLoading(true);
+  setLoadingStep(1);
+
+  await delay(300);
+  setLoadingStep(2);
+
+  try {
+    const product = await fetchProduct(code);
+    setLoadingStep(3);
+    await delay(400);
+    setLoadingStep(4);
+    await delay(400);
+    showLoading(false);
+    showResult(product, code);
+    saveToHistory(product, code);
+  } catch (err) {
+    showLoading(false);
+    showToast('❌ ' + err.message, 'error');
+    resumeScanning();
+  }
+}
+
+function flashCorners() {
+  ['c-tl','c-tr','c-bl','c-br'].forEach(id => {
+    const el = document.getElementById(id);
+    el.classList.add('found');
+    setTimeout(() => el.classList.remove('found'), 1000);
+  });
+}
+
+function resumeScanning() {
+  scanning = true;
+  document.getElementById('scan-line').classList.remove('paused');
+  document.getElementById('scan-instruction').textContent = 'Centrez le code-barres';
+  lastScannedCode = null;
+}
+
+// ===========================
+// FETCH PRODUCT
+// ===========================
+async function fetchProduct(barcode) {
+  // Try Open Food Facts (world + fr)
+  const urls = [
+    `https://world.openfoodfacts.org/api/v2/product/${barcode}.json?fields=product_name,brands,image_url,nutriments,nutriscore_grade,nova_group,ingredients_text_fr,ingredients_text,allergens_tags,quantity,serving_size,categories_tags`,
+    `https://fr.openfoodfacts.org/api/v2/product/${barcode}.json?fields=product_name,brands,image_url,nutriments,nutriscore_grade,nova_group,ingredients_text_fr,ingredients_text,allergens_tags,quantity,serving_size`
+  ];
+
+  let data = null;
+  for (const url of urls) {
+    try {
+      const resp = await fetch(url, {
+        headers: {
+          'User-Agent': 'NutriScan/1.0 (contact@nutriscan.app)'
+        }
+      });
+      if (!resp.ok) continue;
+      const json = await resp.json();
+      if (json.status === 1 && json.product) {
+        data = json.product;
+        break;
+      }
+    } catch (e) { continue; }
+  }
+
+  if (!data) {
+    throw new Error('Produit non trouvé dans la base de données');
+  }
+
+  return parseProduct(data, barcode);
+}
+
+function parseProduct(p, barcode) {
+  const n = p.nutriments || {};
+
+  // Per 100g values
+  const cal    = round(n['energy-kcal_100g'] || n['energy-kcal'] || 0);
+  const fat    = round(n['fat_100g'] || 0);
+  const satFat = round(n['saturated-fat_100g'] || 0);
+  const carb   = round(n['carbohydrates_100g'] || 0);
+  const sugar  = round(n['sugars_100g'] || 0);
+  const fiber  = round(n['fiber_100g'] || 0);
+  const prot   = round(n['proteins_100g'] || 0);
+  const salt   = round(n['salt_100g'] || 0);
+  const sodium = round(n['sodium_100g'] || 0);
+
+  // Health score calculation
+  const score = computeHealthScore(p, n);
+  
+  // NutriScore grade
+  const grade = (p.nutriscore_grade || '').toUpperCase();
+  
+  // Ingredients
+  const ingr = p.ingredients_text_fr || p.ingredients_text || '';
+  
+  // Allergens
+  const allergens = (p.allergens_tags || [])
+    .map(a => a.replace('en:', '').replace('fr:', ''))
+    .filter(Boolean);
+
+  // Emoji
+  const emoji = getProductEmoji(p);
+  
+  // Name
+  const name = p.product_name || `Produit ${barcode}`;
+  const brand = p.brands || '';
+
+  return {
+    barcode, name, brand, emoji,
+    grade, score, cal, fat, satFat, carb, sugar, fiber, prot, salt, sodium,
+    ingr, allergens,
+    quantity: p.quantity || '',
+    servingSize: p.serving_size || '',
+    novaGroup: p.nova_group || null,
+    imageUrl: p.image_url || null
+  };
+}
+
+function round(v) { return Math.round(v * 10) / 10; }
+
+function computeHealthScore(p, n) {
+  let score = 60; // base
+
+  const cal    = n['energy-kcal_100g'] || 0;
+  const sugar  = n['sugars_100g'] || 0;
+  const satFat = n['saturated-fat_100g'] || 0;
+  const salt   = n['salt_100g'] || 0;
+  const fiber  = n['fiber_100g'] || 0;
+  const prot   = n['proteins_100g'] || 0;
+  const fat    = n['fat_100g'] || 0;
+
+  // Penalize
+  if (cal > 500) score -= 20; else if (cal > 300) score -= 10; else if (cal > 150) score -= 5;
+  if (sugar > 20) score -= 20; else if (sugar > 10) score -= 10; else if (sugar > 5) score -= 5;
+  if (satFat > 10) score -= 15; else if (satFat > 5) score -= 8; else if (satFat > 2) score -= 3;
+  if (salt > 2) score -= 15; else if (salt > 1) score -= 8; else if (salt > 0.5) score -= 4;
+  if (fat > 30) score -= 10; else if (fat > 20) score -= 5;
+
+  // Reward
+  if (fiber > 6) score += 15; else if (fiber > 3) score += 8; else if (fiber > 1) score += 4;
+  if (prot > 20) score += 10; else if (prot > 10) score += 5;
+
+  // Nutriscore bonus/penalty
+  const grade = (p.nutriscore_grade || '').toLowerCase();
+  const gradeBonus = { 'a': 20, 'b': 10, 'c': 0, 'd': -10, 'e': -20 };
+  if (gradeBonus[grade] !== undefined) score += gradeBonus[grade];
+
+  // NOVA penalty
+  const nova = p.nova_group;
+  if (nova === 4) score -= 10; else if (nova === 3) score -= 5;
+
+  return Math.max(2, Math.min(100, Math.round(score)));
+}
+
+function getProductEmoji(p) {
+  const cats = (p.categories_tags || []).join(' ').toLowerCase();
+  const name = (p.product_name || '').toLowerCase();
+  if (cats.includes('water') || name.includes('eau')) return '💧';
+  if (cats.includes('milk') || cats.includes('lait')) return '🥛';
+  if (cats.includes('juice') || cats.includes('jus')) return '🧃';
+  if (cats.includes('cola') || cats.includes('soda')) return '🥤';
+  if (cats.includes('energy')) return '⚡';
+  if (cats.includes('beer') || cats.includes('bière')) return '🍺';
+  if (cats.includes('wine') || cats.includes('vin')) return '🍷';
+  if (cats.includes('chocolate') || cats.includes('chocolat')) return '🍫';
+  if (cats.includes('biscuit') || cats.includes('cookie')) return '🍪';
+  if (cats.includes('bread') || cats.includes('pain')) return '🍞';
+  if (cats.includes('cheese') || cats.includes('fromage')) return '🧀';
+  if (cats.includes('yogurt') || cats.includes('yaourt')) return '🥣';
+  if (cats.includes('chips') || cats.includes('crisps')) return '🍟';
+  if (cats.includes('candy') || cats.includes('bonbon')) return '🍬';
+  if (cats.includes('ice cream') || cats.includes('glace')) return '🍦';
+  if (cats.includes('coffee') || cats.includes('café')) return '☕';
+  if (cats.includes('tea') || cats.includes('thé')) return '🍵';
+  if (cats.includes('vegetable') || cats.includes('légume')) return '🥦';
+  if (cats.includes('fruit')) return '🍎';
+  if (cats.includes('meat') || cats.includes('viande')) return '🥩';
+  if (cats.includes('fish') || cats.includes('poisson')) return '🐟';
+  if (cats.includes('pasta') || cats.includes('pâtes')) return '🍝';
+  if (cats.includes('rice') || cats.includes('riz')) return '🍚';
+  if (cats.includes('sauce')) return '🫙';
+  return '🛒';
+}
+
+// ===========================
+// RESULT SHEET
+// ===========================
+function showResult(product, code) {
+  const sheet = document.getElementById('result-sheet');
+  const content = document.getElementById('sheet-content');
+  content.innerHTML = buildResultHTML(product);
+  sheet.classList.add('open');
+
+  // Animate score bar after render
+  setTimeout(() => {
+    const fill = document.getElementById('score-fill-anim');
+    if (fill) fill.style.width = product.score + '%';
+  }, 200);
+
+  // Drag to close
+  setupSheetDrag(sheet);
+}
+
+function buildResultHTML(p) {
+  const scoreColor = getScoreColor(p.score);
+  const scoreLabel = getScoreLabel(p.score);
+  const gradeColor = getGradeColor(p.grade);
+
+  const nutriscoreBlock = p.grade ? `
+    <span class="nutri-grade-badge" style="background:${gradeColor}22;border:1px solid ${gradeColor}55;color:${gradeColor}">
+      NutriScore ${p.grade}
+    </span>
+  ` : '';
+
+  const novaBlock = p.novaGroup ? `
+    <span class="nutri-grade-badge" style="background:rgba(255,255,255,0.07);border:1px solid rgba(255,255,255,0.15);color:rgba(255,255,255,0.6);margin-left:6px;">
+      NOVA ${p.novaGroup}
+    </span>
+  ` : '';
+
+  const quantityBlock = p.quantity ? `<div style="font-size:0.7rem;color:rgba(255,255,255,0.35);margin-top:4px;">${p.quantity}</div>` : '';
+
+  const allergensBlock = p.allergens.length ? `
+    <div style="margin-top:10px;">
+      <div style="font-size:0.65rem;color:rgba(255,77,109,0.8);margin-bottom:5px;font-weight:600;letter-spacing:0.05em;text-transform:uppercase;">⚠ Allergènes</div>
+      ${p.allergens.map(a => `<span class="allergen-tag">${a}</span>`).join('')}
+    </div>
+  ` : '';
+
+  const ingr = p.ingr ? `
+    <div class="glass-card fade-in-up" style="animation-delay:0.15s">
+      <div class="card-title">Ingrédients</div>
+      <div class="ingredients-text">${p.ingr}</div>
+      ${allergensBlock}
+    </div>
+  ` : '';
+
+  const calPerServing = p.servingSize ? `<div class="nutri-item-sub">~${Math.round(p.cal * parseFloat(p.servingSize) / 100)} kcal / portion</div>` : '';
+
+  return `
+    <div class="product-hero fade-in-up">
+      <div class="product-emoji-big">${p.emoji}</div>
+      <div class="product-hero-info">
+        <div class="product-hero-name">${p.name}</div>
+        <div class="product-hero-brand">${p.brand}</div>
+        <div>${nutriscoreBlock}${novaBlock}</div>
+        ${quantityBlock}
+      </div>
+    </div>
+
+    <div class="action-row fade-in-up">
+      <button class="action-btn primary" onclick="shareProduct('${p.name.replace(/'/g,"\\'")}', ${p.score})">
+        ↗ Partager
+      </button>
+      <button class="action-btn" onclick="copyBarcode('${p.barcode}')">
+        # Code-barres
+      </button>
+    </div>
+
+    <div class="glass-card fade-in-up" style="animation-delay:0.05s">
+      <div class="card-title">Score Santé IA</div>
+      <div class="score-display">
+        <div class="score-circle" style="background:${scoreColor}22;border:2px solid ${scoreColor}55;">
+          <div class="score-circle-num" style="color:${scoreColor}">${p.score}</div>
+          <div class="score-circle-max">/100</div>
+        </div>
+        <div class="score-info">
+          <div class="score-grade" style="color:${scoreColor}">${scoreLabel}</div>
+          <div class="score-bar">
+            <div class="score-fill" id="score-fill-anim" style="background:linear-gradient(90deg, ${scoreColor}88, ${scoreColor})"></div>
+          </div>
+        </div>
+      </div>
+      <div class="score-desc">${getScoreDescription(p)}</div>
+    </div>
+
+    <div class="glass-card fade-in-up" style="animation-delay:0.1s">
+      <div class="card-title">Valeurs nutritionnelles <span style="font-size:0.6rem;font-weight:400;margin-left:auto;opacity:0.5">pour 100g</span></div>
+      <div class="nutri-grid">
+        <div class="nutri-item highlight">
+          <div class="nutri-item-label">Calories</div>
+          <div class="nutri-item-val">${p.cal}</div>
+          <div class="nutri-item-sub">kcal</div>
+          ${calPerServing}
+        </div>
+        <div class="nutri-item">
+          <div class="nutri-item-label">Glucides</div>
+          <div class="nutri-item-val">${p.carb}g</div>
+          <div class="nutri-item-sub">dont sucres: ${p.sugar}g</div>
+        </div>
+        <div class="nutri-item">
+          <div class="nutri-item-label">Lipides</div>
+          <div class="nutri-item-val">${p.fat}g</div>
+          <div class="nutri-item-sub">dont saturés: ${p.satFat}g</div>
+        </div>
+        <div class="nutri-item">
+          <div class="nutri-item-label">Protéines</div>
+          <div class="nutri-item-val">${p.prot}g</div>
+          <div class="nutri-item-sub">&nbsp;</div>
+        </div>
+        <div class="nutri-item">
+          <div class="nutri-item-label">Fibres</div>
+          <div class="nutri-item-val">${p.fiber}g</div>
+          <div class="nutri-item-sub">&nbsp;</div>
+        </div>
+        <div class="nutri-item">
+          <div class="nutri-item-label">Sel</div>
+          <div class="nutri-item-val">${p.salt}g</div>
+          <div class="nutri-item-sub">sodium: ${p.sodium}g</div>
+        </div>
+      </div>
+    </div>
+
+    ${ingr}
+
+    <button class="close-btn" onclick="closeResult()">✕ Fermer et rescanner</button>
+  `;
+}
+
+function getScoreColor(s) {
+  if (s >= 75) return '#06d6a0';
+  if (s >= 55) return '#00f5c4';
+  if (s >= 40) return '#ffd166';
+  if (s >= 25) return '#ff9f1c';
+  return '#ff4d6d';
+}
+function getScoreLabel(s) {
+  if (s >= 80) return 'Excellent 🌿';
+  if (s >= 65) return 'Bon pour la santé';
+  if (s >= 50) return 'Correct';
+  if (s >= 35) return 'Modéré';
+  if (s >= 20) return 'À limiter';
+  return 'À éviter';
+}
+function getGradeColor(g) {
+  const colors = { 'A':'#00b050','B':'#85bb65','C':'#ffcc00','D':'#ff9900','E':'#ff0000' };
+  return colors[g] || 'rgba(255,255,255,0.5)';
+}
+function getScoreDescription(p) {
+  const parts = [];
+  if (p.cal > 400) parts.push('calorique');
+  else if (p.cal < 80) parts.push('peu calorique');
+  if (p.sugar > 15) parts.push('riche en sucres');
+  if (p.satFat > 8) parts.push('riche en graisses saturées');
+  if (p.fiber > 5) parts.push('bonne source de fibres');
+  if (p.prot > 15) parts.push('riche en protéines');
+  if (p.salt > 1.5) parts.push('teneur en sel élevée');
+  if (p.novaGroup === 4) parts.push('aliment ultra-transformé (NOVA 4)');
+  if (!parts.length) return 'Profil nutritionnel équilibré.';
+  return parts.join(', ').charAt(0).toUpperCase() + parts.join(', ').slice(1) + '.';
+}
+
+function closeResult() {
+  document.getElementById('result-sheet').classList.remove('open');
+  resumeScanning();
+}
+
+// Drag-to-close sheet
+function setupSheetDrag(sheet) {
+  let startY = 0, currentY = 0, isDragging = false;
+  const onStart = e => { startY = (e.touches?.[0] || e).clientY; isDragging = true; };
+  const onMove = e => {
+    if (!isDragging) return;
+    currentY = (e.touches?.[0] || e).clientY - startY;
+    if (currentY > 0) sheet.style.transform = `translateY(${currentY}px)`;
+  };
+  const onEnd = () => {
+    isDragging = false;
+    sheet.style.transform = '';
+    if (currentY > 100) closeResult();
+    currentY = 0;
+  };
+  sheet.addEventListener('touchstart', onStart, { passive: true });
+  sheet.addEventListener('touchmove', onMove, { passive: true });
+  sheet.addEventListener('touchend', onEnd);
+}
+
+// ===========================
+// MANUAL INPUT
+// ===========================
+function openManualInput() {
+  const code = prompt('Entrez le code-barres (EAN/UPC):');
+  if (code && code.trim().length >= 8) {
+    onBarcodeFound(code.trim());
+  }
+}
+
+// ===========================
+// HISTORY
+// ===========================
+function saveToHistory(product, code) {
+  const entry = {
+    ...product,
+    scannedAt: new Date().toISOString()
+  };
+  // Remove duplicate
+  history = history.filter(h => h.barcode !== code);
+  history.unshift(entry);
+  if (history.length > 50) history = history.slice(0, 50);
+  localStorage.setItem('nutriscan_history', JSON.stringify(history));
+  updateHistoryBadge();
+}
+
+function updateHistoryBadge() {
+  const count = history.length;
+  document.getElementById('history-count').textContent =
+    count ? `${count} produit${count > 1 ? 's' : ''} scanné${count > 1 ? 's' : ''}` : 'Aucun produit scanné';
+}
+
+function renderHistory() {
+  const list = document.getElementById('history-list');
+  const empty = document.getElementById('empty-history');
+
+  if (!history.length) {
+    empty.style.display = 'flex';
+    list.querySelectorAll('.history-item').forEach(e => e.remove());
+    return;
+  }
+  empty.style.display = 'none';
+  list.querySelectorAll('.history-item').forEach(e => e.remove());
+
+  history.forEach(item => {
+    const scoreColor = getScoreColor(item.score);
+    const time = new Date(item.scannedAt);
+    const timeStr = time.toLocaleTimeString('fr-FR', { hour:'2-digit', minute:'2-digit' }) +
+                    ' · ' + time.toLocaleDateString('fr-FR', { day:'2-digit', month:'2-digit' });
+    const div = document.createElement('div');
+    div.className = 'history-item';
+    div.innerHTML = `
+      <div class="history-emoji">${item.emoji}</div>
+      <div class="history-info">
+        <div class="history-name">${item.name}</div>
+        <div class="history-brand">${item.brand || item.barcode}</div>
+        <div class="history-time">${timeStr}</div>
+      </div>
+      <div class="history-score-badge" style="background:${scoreColor}22;border:1px solid ${scoreColor}44;color:${scoreColor}">
+        ${item.score}
+      </div>
+    `;
+    div.onclick = () => {
+      showTab('scanner');
+      setTimeout(() => showResult(item), 300);
+    };
+    list.appendChild(div);
+  });
+}
+
+// ===========================
+// TABS
+// ===========================
+function showTab(tab) {
+  if (tab === 'scanner') {
+    showScreen('scanner');
+    document.querySelectorAll('.tab-btn').forEach((b, i) => {
+      b.classList.toggle('active', i === 0);
+    });
+  } else {
+    showScreen('history');
+    renderHistory();
+    updateHistoryBadge();
+  }
+}
+
+// ===========================
+// LOADING
+// ===========================
+function showLoading(show) {
+  document.getElementById('loading-overlay').classList.toggle('show', show);
+  if (!show) {
+    ['ls1','ls2','ls3','ls4'].forEach(id => {
+      document.getElementById(id).className = 'loading-step';
+    });
+  }
+}
+function setLoadingStep(n) {
+  for (let i = 1; i <= 4; i++) {
+    const el = document.getElementById('ls' + i);
+    if (i < n) el.className = 'loading-step done';
+    else if (i === n) el.className = 'loading-step active';
+    else el.className = 'loading-step';
+  }
+}
+
+// ===========================
+// TOAST
+// ===========================
+function showToast(msg, type = 'success') {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = `toast show ${type}`;
+  setTimeout(() => t.className = 'toast', 3000);
+}
+
+// ===========================
+// SHARE / COPY
+// ===========================
+async function shareProduct(name, score) {
+  const text = `J'ai scanné "${name}" avec NutriScan — Score santé: ${score}/100`;
+  if (navigator.share) {
+    try { await navigator.share({ title: 'NutriScan', text }); } catch {}
+  } else {
+    await navigator.clipboard.writeText(text);
+    showToast('✓ Copié dans le presse-papiers');
+  }
+}
+async function copyBarcode(code) {
+  try {
+    await navigator.clipboard.writeText(code);
+    showToast('✓ Code-barres copié: ' + code);
+  } catch {
+    showToast('Code: ' + code);
+  }
+}
+
+// ===========================
+// UTILS
+// ===========================
+function delay(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+// ===========================
+// PWA INSTALL PROMPT
+// ===========================
+let deferredInstallPrompt = null;
+window.addEventListener('beforeinstallprompt', e => {
+  e.preventDefault();
+  deferredInstallPrompt = e;
+});
+
+// Service worker only for PWA (not APK)
+if ('serviceWorker' in navigator && !window.Capacitor) {
+  navigator.serviceWorker.register('sw.js').catch(() => {});
+}
+
+// Init
+updateHistoryBadge();
+</script>
+</body>
+</html>

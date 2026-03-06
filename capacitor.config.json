@@ -1,0 +1,46 @@
+{
+  "appId": "app.nutriscan.scanner",
+  "appName": "NutriScan",
+  "webDir": "www",
+  "bundledWebRuntime": false,
+  "backgroundColor": "#0a0a12",
+  "android": {
+    "allowMixedContent": false,
+    "captureInput": true,
+    "webContentsDebuggingEnabled": false,
+    "backgroundColor": "#0a0a12",
+    "buildOptions": {
+      "keystorePath": "nutriscan.keystore",
+      "keystoreAlias": "nutriscan"
+    }
+  },
+  "plugins": {
+    "SplashScreen": {
+      "launchShowDuration": 1500,
+      "launchAutoHide": true,
+      "backgroundColor": "#0a0a12",
+      "androidSplashResourceName": "splash",
+      "androidScaleType": "CENTER_CROP",
+      "showSpinner": false
+    },
+    "StatusBar": {
+      "style": "Dark",
+      "backgroundColor": "#0a0a12",
+      "overlaysWebView": true
+    },
+    "Camera": {
+      "permissions": ["camera"]
+    }
+  },
+  "server": {
+    "androidScheme": "https",
+    "cleartext": false,
+    "allowNavigation": [
+      "*.openfoodfacts.org",
+      "*.openfoodfacts.net",
+      "fonts.googleapis.com",
+      "fonts.gstatic.com",
+      "unpkg.com"
+    ]
+  }
+}

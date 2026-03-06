@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Remplacer android/app/src/main/res/values/strings.xml -->
+<resources>
+    <string name="app_name">NutriScan</string>
+    <string name="title_activity_main">NutriScan</string>
+    <string name="package_name">app.nutriscan.scanner</string>
+    <string name="custom_url_scheme">app.nutriscan.scanner</string>
+</resources>
